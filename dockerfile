@@ -4,16 +4,16 @@ FROM microsoft/dotnet-framework:4.7.2-sdk-windowsservercore-1709
 
 
 RUN powershell Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
-RUN choco install -y --no-progress visualstudio2017buildtools
-RUN choco install -y --no-progress visualstudio2017-workload-vctools
-RUN choco install -y --no-progress visualstudio2017-workload-netweb
-RUN choco install -y --no-progress visualstudio2017-workload-webbuildtools
-RUN choco install -y --no-progress visualstudio2017-workload-azure
-#RUN choco install -y --no-progress visualstudio2017testagent
+RUN choco install -y --no-progress visualstudio2019buildtools
+RUN choco install -y --no-progress visualstudio2019-workload-vctools
+RUN choco install -y --no-progress visualstudio2019-workload-netweb
+RUN choco install -y --no-progress visualstudio2019-workload-webbuildtools
+RUN choco install -y --no-progress visualstudio2019-workload-azure
+#RUN choco install -y --no-progress visualstudio2019testagent
 
 RUN choco install -y --no-progress nodejs
 RUN choco install -y --no-progress jdk8
-RUN choco install -y --no-progress netfx-4.7.2-devpack
+RUN choco install -y --no-progress netfx-4.8-devpack
 RUN choco install -y --no-progress dotnetcore-sdk
 RUN choco install -y --no-progress webdeploy
 
