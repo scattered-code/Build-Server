@@ -1,81 +1,72 @@
 # Source https://github.com/microsoft/vsts-agent-docker/blob/master/windows/servercore/10.0.14393/Start.ps1
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/agents/docker?view=azure-devops
 
-$ErrorActionPreference = "Stop"
-
-If ($env:VSTS_ACCOUNT -eq $null) {
-    Write-Error "Missing VSTS_ACCOUNT environment variable"
+if (-not (Test-Path Env:AZP_URL)) {
+    Write-Error "error: missing AZP_URL environment variable"
     exit 1
-}
-
-if ($env:VSTS_TOKEN -eq $null) {
-    Write-Error "Missing VSTS_TOKEN environment variable"
-    exit 1
-} else {
-    if (Test-Path -Path $env:VSTS_TOKEN -PathType Leaf) {
-        $env:VSTS_TOKEN = Get-Content -Path $env:VSTS_TOKEN -ErrorAction Stop | Where-Object {$_} | Select-Object -First 1
-        
-        if ([string]::IsNullOrEmpty($env:VSTS_TOKEN)) {
-            Write-Error "Missing VSTS_TOKEN file content"
-            exit 1
-        }
+  }
+  
+  if (-not (Test-Path Env:AZP_TOKEN_FILE)) {
+    if (-not (Test-Path Env:AZP_TOKEN)) {
+      Write-Error "error: missing AZP_TOKEN environment variable"
+      exit 1
     }
-}
-
-if ($env:VSTS_AGENT -ne $null) {
-    $env:VSTS_AGENT = $($env:VSTS_AGENT)
-}
-else {
-    $env:VSTS_AGENT = $env:COMPUTERNAME
-}
-
-if ($env:VSTS_WORK -ne $null)
-{
-    New-Item -Path $env:VSTS_WORK -ItemType Directory -Force
-}
-else
-{
-    $env:VSTS_WORK = "_work"
-}
-
-if($env:VSTS_POOL -eq $null)
-{
-    $env:VSTS_POOL = "Default"
-}
-
-$useragent = 'vsts-windowscontainer'
-$creds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($("user:$env:VSTS_TOKEN")))
-$encodedAuthValue = "Basic $creds"
-$acceptHeaderValue = "application/json;api-version=3.0-preview"
-$headers = @{Authorization = $encodedAuthValue;Accept = $acceptHeaderValue }
-$vstsUrl = "https://$env:VSTS_ACCOUNT.visualstudio.com/_apis/distributedtask/packages/agent?platform=win7-x64&`$top=1"
-$response = Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $vstsUrl -UserAgent $useragent
-
-$response = ConvertFrom-Json $response.Content
-
-Write-Host "Download agent to C:\BuildAgent\agent.zip"
-Invoke-WebRequest -Uri $response.value[0].downloadUrl -OutFile C:\BuildAgent\agent.zip
-
-Write-Host "Extract agent.zip"
-Expand-Archive -Path C:\BuildAgent\agent.zip -DestinationPath C:\BuildAgent
-
-Write-Host "Deleting agent.zip"
-Remove-Item -Path C:\BuildAgent\agent.zip
-
-$env:VSO_AGENT_IGNORE="VSTS_AGENT_URL,VSO_AGENT_IGNORE,VSTS_AGENT,VSTS_ACCOUNT,VSTS_TOKEN,VSTS_POOL,VSTS_WORK"
-if ($env:VSTS_AGENT_IGNORE -ne $null)
-{
-    $env:VSO_AGENT_IGNORE="$env:VSO_AGENT_IGNORE,$env:VSTS_AGENT_IGNORE,VSTS_AGENT_IGNORE"
-}
-
-Set-Location -Path "C:\BuildAgent"
-
-& .\bin\Agent.Listener.exe configure --unattended `
-    --agent "$env:VSTS_AGENT" `
-    --url "https://$env:VSTS_ACCOUNT.visualstudio.com" `
-    --auth PAT `
-    --token "$env:VSTS_TOKEN" `
-    --pool "$env:VSTS_POOL" `
-    --work "$env:VSTS_WORK" `
-    --replace
-
-& .\bin\Agent.Listener.exe run
+  
+    $Env:AZP_TOKEN_FILE = "\.token"
+    $Env:AZP_TOKEN | Out-File -FilePath $Env:AZP_TOKEN_FILE
+  }
+  
+  Remove-Item Env:AZP_TOKEN
+  
+  if (-not (Test-Path Env:AZP_WORK)) {
+    New-Item $Env:AZP_WORK -ItemType directory | Out-Null
+  }
+  
+  New-Item "\agent" -ItemType directory | Out-Null
+  
+  # Let the agent ignore the token env variables
+  $Env:VSO_AGENT_IGNORE = "AZP_TOKEN,AZP_TOKEN_FILE"
+  
+  Set-Location agent
+  
+  Write-Host "1. Determining matching Azure Pipelines agent..." -ForegroundColor Cyan
+  
+  $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$(Get-Content ${Env:AZP_TOKEN_FILE})"))
+  $package = Invoke-RestMethod -Headers @{Authorization=("Basic $base64AuthInfo")} "$(${Env:AZP_URL})/_apis/distributedtask/packages/agent?platform=win-x64&`$top=1"
+  $packageUrl = $package[0].Value.downloadUrl
+  
+  Write-Host $packageUrl
+  
+  Write-Host "2. Downloading and installing Azure Pipelines agent..." -ForegroundColor Cyan
+  
+  $wc = New-Object System.Net.WebClient
+  $wc.DownloadFile($packageUrl, "$(Get-Location)\agent.zip")
+  
+  Expand-Archive -Path "agent.zip" -DestinationPath "\agent"
+  
+  try
+  {
+    Write-Host "3. Configuring Azure Pipelines agent..." -ForegroundColor Cyan
+  
+    .\config.cmd --unattended `
+      --agent "$(if (Test-Path Env:AZP_AGENT_NAME) { ${Env:AZP_AGENT_NAME} } else { ${Env:computername} })" `
+      --url "$(${Env:AZP_URL})" `
+      --auth PAT `
+      --token "$(Get-Content ${Env:AZP_TOKEN_FILE})" `
+      --pool "$(if (Test-Path Env:AZP_POOL) { ${Env:AZP_POOL} } else { 'Default' })" `
+      --work "$(if (Test-Path Env:AZP_WORK) { ${Env:AZP_WORK} } else { '_work' })" `
+      --replace
+  
+    Write-Host "4. Running Azure Pipelines agent..." -ForegroundColor Cyan
+  
+    .\run.cmd
+  }
+  finally
+  {
+    Write-Host "Cleanup. Removing Azure Pipelines agent..." -ForegroundColor Cyan
+  
+    .\config.cmd remove --unattended `
+      --auth PAT `
+      --token "$(Get-Content ${Env:AZP_TOKEN_FILE})"
+  }
+  
